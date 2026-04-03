@@ -23,6 +23,7 @@ def request_otp(payload: OtpRequest, db: Session = Depends(get_db)):
         otp_code = str(random.randint(100000, 999999))
         print(f"[LOCAL TEST LOG] Simulating Local OTP: {otp_code} to {formatted_number}")
         db.query(OtpSession).filter(OtpSession.mobile_number == mobile).delete()
+        print("OTP: ", otp_code)
         session_record = OtpSession(
             mobile_number=mobile,
             otp_code=otp_code,

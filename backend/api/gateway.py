@@ -68,7 +68,7 @@ def create_order(
         amount_paise=payload.amount_paise,
         status=ProviderPaymentStatus.CREATED,
         idempotency_key=payload.idempotency_key,
-        metadata=json.dumps(payload.metadata) if payload.metadata else None,
+        tx_metadata=json.dumps(payload.metadata) if payload.metadata else None,
     )
     db.add(record)
     db.commit()
@@ -146,18 +146,18 @@ def run_reconciliation(
         for row in rows:
             provider_status = row.status.value
             provider_amount = row.amount_paise
-            metadata = {}
-            if row.metadata:
+            tx_metadata = {}
+            if row.tx_metadata:
                 try:
-                    metadata = json.loads(row.metadata)
+                    tx_metadata = json.loads(row.tx_metadata)
                 except Exception:
-                    metadata = {}
+                    tx_metadata = {}
 
             # Demo simulation hooks to surface reconciliation mismatches.
-            if isinstance(metadata.get("force_provider_status"), str):
-                provider_status = metadata["force_provider_status"].strip().upper()
-            if isinstance(metadata.get("force_provider_amount_paise"), int):
-                provider_amount = int(metadata["force_provider_amount_paise"])
+            if isinstance(tx_metadata.get("force_provider_status"), str):
+                provider_status = tx_metadata["force_provider_status"].strip().upper()
+            if isinstance(tx_metadata.get("force_provider_amount_paise"), int):
+                provider_amount = int(tx_metadata["force_provider_amount_paise"])
 
             local_status = row.status.value
             local_amount = row.amount_paise

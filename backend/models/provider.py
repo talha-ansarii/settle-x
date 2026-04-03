@@ -33,7 +33,7 @@ class ProviderTransaction(Base):
     currency = Column(String, nullable=False, default="INR")
     status = Column(Enum(ProviderPaymentStatus), nullable=False, default=ProviderPaymentStatus.CREATED)
     idempotency_key = Column(String, unique=True, index=True, nullable=True)
-    metadata = Column(String, nullable=True)
+    tx_metadata = Column("metadata", String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
