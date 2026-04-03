@@ -3,10 +3,7 @@ from sqlalchemy.engine import Engine
 
 
 def ensure_bond_catalog_columns(engine: Engine):
-    """Adds bond catalog / holding lineage columns for local SQLite DBs."""
-    if not str(engine.url).startswith("sqlite"):
-        return
-
+    """Adds bond catalog / holding lineage columns that may be missing from the DB."""
     inspector = inspect(engine)
     tables = inspector.get_table_names()
     if "bonds" not in tables or "bond_holdings" not in tables:
