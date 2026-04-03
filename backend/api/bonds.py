@@ -6,7 +6,17 @@ from pydantic import BaseModel
 
 from database.session import get_db
 from models.user import User
-from models.bonds import Bond, BondHolding, HoldingStatus, BondEvent, BondEventType
+from models.bonds import (
+    Bond,
+    BondHolding,
+    HoldingStatus,
+    BondEvent,
+    BondEventType,
+    BondRiskProfile,
+    RiskTier,
+    BondRecommendation,
+    BondRecommendationAudit,
+)
 from models.ledger import LedgerAccount, AccountType, Transaction, TransactionStatus, LedgerEntry, EntryDirection
 from api.deps import get_current_user
 from api.payments import get_wallet, calculate_balance
@@ -92,6 +102,238 @@ def append_bond_event(
         event_metadata=json.dumps(metadata) if metadata else None
     )
     db.add(event)
+
+
+def _clamp(value: float, low: int = 0, high: int = 100) -> int:
+    return max(low, min(high, int(round(value))))
+
+
+def get_or_create_risk_profile(db: Session, bond: Bond) -> BondRiskProfile:
+    profile = db.query(BondRiskProfile).filter(BondRiskProfile.bond_id == bond.id).first()
+    if profile:
+        return profile
+
+    # Heuristic defaults for demo environments where a risk feed is not integrated yet.
+    duration_penalty = min(40, bond.maturity_seconds / 30)
+    safety_score = _clamp(95 - duration_penalty - max(0, bond.apy_rate - 12))
+    liquidity_score = _clamp(90 - min(45, bond.maturity_seconds / 45))
+
+    if safety_score >= 80:
+        tier = RiskTier.LOW
+    elif safety_score >= 60:
+        tier = RiskTier.MEDIUM
+    else:
+        tier = RiskTier.HIGH
+
+    profile = BondRiskProfile(
+        bond_id=bond.id,
+        issuer_type="GOVERNMENT_SIMULATED",
+        safety_score=safety_score,
+        liquidity_score=liquidity_score,
+        risk_tier=tier,
+    )
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+class RecommendRequest(BaseModel):
+    amount_paise: int
+    min_safety_score: int = 70
+    min_liquidity_score: int = 50
+    max_maturity_seconds: int | None = None
+
+
+@router.post("/recommend")
+def recommend_bond(
+    payload: RecommendRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if payload.amount_paise <= 0:
+        api_error(400, "INVALID_AMOUNT", "amount_paise must be greater than zero.")
+
+    active_bonds = db.query(Bond).filter(Bond.is_active == True).all()
+    if not active_bonds:
+        api_error(404, "NO_ACTIVE_BONDS", "No active Treasury bonds available.")
+
+    candidates = []
+    excluded = []
+
+    for bond in active_bonds:
+        profile = get_or_create_risk_profile(db, bond)
+        reasons = []
+        if profile.safety_score < payload.min_safety_score:
+            reasons.append(f"safety_score<{payload.min_safety_score}")
+        if profile.liquidity_score < payload.min_liquidity_score:
+            reasons.append(f"liquidity_score<{payload.min_liquidity_score}")
+        if payload.max_maturity_seconds is not None and bond.maturity_seconds > payload.max_maturity_seconds:
+            reasons.append(f"maturity_seconds>{payload.max_maturity_seconds}")
+
+        if reasons:
+            excluded.append(
+                {
+                    "bond_id": bond.id,
+                    "bond_name": bond.name,
+                    "apy": bond.apy_rate,
+                    "safety_score": profile.safety_score,
+                    "liquidity_score": profile.liquidity_score,
+                    "reasons": reasons,
+                }
+            )
+            continue
+
+        # Safety first ranking; yield comes after risk controls.
+        ranking_score = (
+            (profile.safety_score * 0.60)
+            + (profile.liquidity_score * 0.25)
+            + (bond.apy_rate * 1.5)
+        )
+        candidates.append(
+            {
+                "bond": bond,
+                "profile": profile,
+                "ranking_score": round(ranking_score, 4),
+            }
+        )
+
+    if not candidates:
+        api_error(
+            400,
+            "NO_POLICY_COMPLIANT_BOND",
+            "No bonds satisfy the current safety/liquidity policy gates.",
+            excluded=excluded,
+        )
+
+    candidates.sort(
+        key=lambda row: (
+            row["ranking_score"],
+            row["profile"].safety_score,
+            row["profile"].liquidity_score,
+            row["bond"].apy_rate,
+        ),
+        reverse=True,
+    )
+    selected = candidates[0]
+    selected_bond: Bond = selected["bond"]
+    selected_profile: BondRiskProfile = selected["profile"]
+    selected_score = selected["ranking_score"]
+
+    rec = BondRecommendation(
+        user_id=current_user.id,
+        recommended_bond_id=selected_bond.id,
+        requested_amount_paise=payload.amount_paise,
+        recommended_allocation_paise=payload.amount_paise,
+        expected_apy=selected_bond.apy_rate,
+        safety_score=selected_profile.safety_score,
+        liquidity_score=selected_profile.liquidity_score,
+        ranking_score=selected_score,
+        policy_version="v1",
+    )
+    db.add(rec)
+    db.flush()
+
+    candidate_snapshot = []
+    for row in candidates:
+        candidate_snapshot.append(
+            {
+                "bond_id": row["bond"].id,
+                "bond_name": row["bond"].name,
+                "apy": row["bond"].apy_rate,
+                "maturity_seconds": row["bond"].maturity_seconds,
+                "safety_score": row["profile"].safety_score,
+                "liquidity_score": row["profile"].liquidity_score,
+                "risk_tier": row["profile"].risk_tier.value,
+                "ranking_score": row["ranking_score"],
+            }
+        )
+
+    audit = BondRecommendationAudit(
+        recommendation_id=rec.id,
+        user_id=current_user.id,
+        input_snapshot=json.dumps(
+            {
+                "amount_paise": payload.amount_paise,
+                "min_safety_score": payload.min_safety_score,
+                "min_liquidity_score": payload.min_liquidity_score,
+                "max_maturity_seconds": payload.max_maturity_seconds,
+                "policy_version": "v1",
+            }
+        ),
+        candidate_snapshot=json.dumps(
+            {
+                "included": candidate_snapshot,
+                "excluded": excluded,
+            }
+        ),
+        decision_snapshot=json.dumps(
+            {
+                "selected_recommendation_id": rec.id,
+                "selected_bond_id": selected_bond.id,
+                "selected_bond_name": selected_bond.name,
+                "ranking_score": selected_score,
+                "explanation": [
+                    "Passed safety and liquidity policy gates.",
+                    f"Safety score {selected_profile.safety_score} prioritized in ranking.",
+                    f"Liquidity score {selected_profile.liquidity_score} reduced settlement risk.",
+                    f"APY {selected_bond.apy_rate}% used as secondary optimization factor.",
+                ],
+            }
+        ),
+    )
+    db.add(audit)
+    db.commit()
+
+    return {
+        "recommendation_id": rec.id,
+        "policy_version": rec.policy_version,
+        "bond": {
+            "id": selected_bond.id,
+            "name": selected_bond.name,
+            "apy": selected_bond.apy_rate,
+            "maturity_seconds": selected_bond.maturity_seconds,
+            "safety_score": selected_profile.safety_score,
+            "liquidity_score": selected_profile.liquidity_score,
+            "risk_tier": selected_profile.risk_tier.value,
+            "ranking_score": selected_score,
+        },
+        "allocation_inr": payload.amount_paise / 100,
+        "rationale": [
+            "Safety-first policy gate passed.",
+            "Chosen highest risk-adjusted score under active constraints.",
+        ],
+    }
+
+
+@router.get("/recommend/{recommendation_id}/audit")
+def get_recommendation_audit(
+    recommendation_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    rec = db.query(BondRecommendation).filter(
+        BondRecommendation.id == recommendation_id,
+        BondRecommendation.user_id == current_user.id
+    ).first()
+    if not rec:
+        api_error(404, "RECOMMENDATION_NOT_FOUND", "Recommendation not found.")
+
+    audit = db.query(BondRecommendationAudit).filter(
+        BondRecommendationAudit.recommendation_id == recommendation_id,
+        BondRecommendationAudit.user_id == current_user.id
+    ).first()
+    if not audit:
+        api_error(404, "RECOMMENDATION_AUDIT_NOT_FOUND", "Recommendation audit not found.")
+
+    return {
+        "recommendation_id": rec.id,
+        "policy_version": rec.policy_version,
+        "input_snapshot": json.loads(audit.input_snapshot),
+        "candidate_snapshot": json.loads(audit.candidate_snapshot),
+        "decision_snapshot": json.loads(audit.decision_snapshot),
+        "created_at": audit.created_at.isoformat(),
+    }
 
 class BuyRequest(BaseModel):
     amount_paise: int
