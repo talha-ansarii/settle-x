@@ -87,8 +87,16 @@ export default function PaymentsPage() {
         } else {
             // Setup robust idempotency key to stop double tapping
             const idemKey = `idem_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            const amtPaise = Math.floor(parseFloat(amountStr) * 100);
-            
+            const normalized = amountStr.replace(/,/g, "").trim();
+            const num = Number(normalized);
+            const amtPaise = Math.round(num * 100);
+            if (!Number.isFinite(amtPaise) || amtPaise <= 0) {
+                setPaymentMsg({ text: "Enter a valid amount in rupees.", type: "error" });
+                setIsPinModalOpen(false);
+                setTxLoading(false);
+                return;
+            }
+
             const res = await fetch(`${apiBase}/payments/transfer`, {
                method: "POST",
                headers: { 
@@ -133,7 +141,7 @@ export default function PaymentsPage() {
                   <ShieldCheck size={40} />
                 </div>
                 <h1 className="text-3xl font-bold mb-4 text-gray-900">Secure Network Access Required</h1>
-                <p className="text-gray-500 mb-8">Please authorize via the SettleX portal in the header to access the internal banking ledger.</p>
+                <p className="text-gray-500 mb-8">Please authorize via the SettleX portal in the header to access payments and your available balance.</p>
               </div>
           </div>
       )
@@ -151,7 +159,7 @@ export default function PaymentsPage() {
                         <Wallet size={200} />
                     </div>
                     <div className="relative z-10 flex justify-between items-start">
-                        <p className="text-[#00baf2] font-semibold text-sm mb-4 flex items-center gap-2"><Landmark size={16}/> SettleX Main Wallet</p>
+                        <p className="text-[#00baf2] font-semibold text-sm mb-4 flex items-center gap-2"><Landmark size={16}/> Account balance</p>
                         <button onClick={() => fetchBalance(true)} className="p-2 hover:bg-white/10 rounded-full transition-colors group">
                            <RefreshCw size={16} className={`text-white/60 group-hover:text-white ${isRefreshing ? 'animate-spin text-white' : ''}`} />
                         </button>
@@ -162,7 +170,7 @@ export default function PaymentsPage() {
                           <span className="text-3xl font-medium mr-1 opacity-70">₹</span>
                           {balance !== null ? balance.toLocaleString('en-IN', {minimumFractionDigits: 2}) : "0.00"}
                         </h2>
-                        <p className="text-sm opacity-80 mb-8 font-medium">Available Clear Balance</p>
+                        <p className="text-sm opacity-80 mb-8 font-medium">Available balance (spendable cash for transfers and bond buys)</p>
                         
                         {!pinSet ? (
                             <button onClick={() => { setIsSetupMode(true); setIsPinModalOpen(true); }} className="w-full bg-[#00baf2] hover:bg-[#00a3d4] transition-colors text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-[#00baf2]/20">

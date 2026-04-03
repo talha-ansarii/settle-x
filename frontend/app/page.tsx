@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   Smartphone,
@@ -15,14 +14,39 @@ import {
   Train,
   Globe,
   ArrowRight,
-  Receipt,
-  PiggyBank
+  X,
 } from "lucide-react";
+
+type TravelMode = "flights" | "bus" | "trains" | "intl";
 
 export default function Home() {
   const router = useRouter();
-  const [travelMode, setTravelMode] = useState<"flights" | "bus" | "trains" | "intl">("flights");
+  const [travelModalOpen, setTravelModalOpen] = useState(false);
+  const [travelMode, setTravelMode] = useState<TravelMode | null>(null);
   const [tripType, setTripType] = useState<"one-way" | "round-trip">("one-way");
+
+  const openTravelModal = useCallback(() => {
+    setTravelMode(null);
+    setTravelModalOpen(true);
+  }, []);
+
+  const closeTravelModal = useCallback(() => {
+    setTravelModalOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!travelModalOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeTravelModal();
+    };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prev;
+    };
+  }, [travelModalOpen, closeTravelModal]);
 
   const handleAction = (feature: string) => {
     alert(`Mock integration: ${feature} initiated.`);
@@ -112,121 +136,221 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Travel / Ticket Card */}
-        <div className="bg-white rounded-3xl p-4 sm:p-8 shadow-sm border border-paytm-border">
-          <div className="flex justify-between items-center mb-6">
-            <div className="flex overflow-x-auto w-full hide-scrollbar gap-2 sm:gap-8 border-b border-gray-100 pb-2">
-              
-              <TabButton 
-                active={travelMode === "flights"} 
-                onClick={() => setTravelMode("flights")} 
-                label="Flights"
-                icon={<Plane size={24} className={travelMode === "flights" ? "text-paytm-cyan" : "text-gray-400"} fill={travelMode === "flights" ? "currentColor" : "none"} />} 
-              />
-              <TabButton 
-                active={travelMode === "bus"} 
-                onClick={() => setTravelMode("bus")} 
-                label="Bus"
-                icon={<Bus size={24} className={travelMode === "bus" ? "text-paytm-cyan" : "text-gray-400"} />} 
-              />
-              <TabButton 
-                active={travelMode === "trains"} 
-                onClick={() => setTravelMode("trains")} 
-                label="Trains"
-                icon={<Train size={24} className={travelMode === "trains" ? "text-paytm-cyan" : "text-gray-400"} />} 
-              />
-              <TabButton 
-                active={travelMode === "intl"} 
-                onClick={() => setTravelMode("intl")} 
-                label="Intl. Flights"
-                icon={<Globe size={24} className={travelMode === "intl" ? "text-paytm-cyan" : "text-gray-400"} />} 
-              />
-              
+        {/* Travel — opens full UI in a modal */}
+        <button
+          type="button"
+          onClick={openTravelModal}
+          className="w-full text-left bg-white rounded-3xl p-4 sm:p-8 shadow-sm border border-paytm-border hover:shadow-md hover:border-paytm-cyan/30 transition-all group"
+        >
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-bold text-gray-900 tracking-tight mb-1">
+                Book travel
+              </h2>
+              <p className="text-sm text-gray-500">
+                Flights, bus, trains &amp; international flights — tap to open
+              </p>
             </div>
-            
-            {/* Fake travel logo */}
-            <div className="hidden lg:flex text-2xl font-bold tracking-tight pl-4">
-               <span className="text-paytm-navy">paytm</span><span className="text-black">travel</span>
+            <div className="flex items-center gap-2 text-paytm-cyan shrink-0">
+              <Plane className="w-8 h-8 opacity-90 group-hover:scale-105 transition-transform" strokeWidth={1.5} />
+              <ArrowRight className="w-5 h-5 text-gray-400 group-hover:text-paytm-cyan transition-colors" />
             </div>
           </div>
+        </button>
 
-          <div className="border border-paytm-border rounded-xl p-4 sm:p-5 shadow-sm bg-white pt-6">
-             {/* Radio buttons */}
-             <div className="flex gap-6 mb-6">
-               <label 
-                 className={`flex items-center gap-2 text-sm sm:text-base font-medium cursor-pointer transition-colors ${tripType === 'one-way' ? 'text-gray-900' : 'text-gray-500'}`}
-                 onClick={() => setTripType("one-way")}
-               >
-                 <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${tripType === 'one-way' ? 'border-paytm-cyan' : 'border-gray-300'}`}>
-                   {tripType === "one-way" && <div className="w-2.5 h-2.5 bg-paytm-cyan rounded-full animate-in zoom-in"></div>}
-                 </div>
-                 One Way
-               </label>
-               <label 
-                 className={`flex items-center gap-2 text-sm sm:text-base font-medium cursor-pointer transition-colors ${tripType === 'round-trip' ? 'text-gray-900' : 'text-gray-500'}`}
-                 onClick={() => setTripType("round-trip")}
-               >
-                 <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${tripType === 'round-trip' ? 'border-paytm-cyan' : 'border-gray-300'}`}>
-                   {tripType === "round-trip" && <div className="w-2.5 h-2.5 bg-paytm-cyan rounded-full animate-in zoom-in"></div>}
-                 </div>
-                 Round Trip
-               </label>
-             </div>
+        {travelModalOpen && (
+          <div
+            className="fixed inset-0 z-[100] flex items-start justify-center sm:items-center p-4 sm:p-6"
+            role="presentation"
+          >
+            <button
+              type="button"
+              aria-label="Close travel booking"
+              className="absolute inset-0 bg-black/45 backdrop-blur-[2px] cursor-default"
+              onClick={closeTravelModal}
+            />
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="travel-modal-title"
+              className="relative w-full max-w-4xl max-h-[calc(100vh-2rem)] overflow-y-auto bg-white rounded-3xl p-4 sm:p-8 shadow-xl border border-paytm-border mt-4 sm:mt-0 animate-in fade-in zoom-in-95 duration-200"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex justify-between items-start gap-4 mb-4">
+                <h2 id="travel-modal-title" className="sr-only">
+                  Book travel
+                </h2>
+                <div className="flex overflow-x-auto w-full min-w-0 hide-scrollbar gap-2 sm:gap-8 border-b border-gray-100 pb-2 pr-2">
+                  <TabButton
+                    active={travelMode === "flights"}
+                    onClick={() => setTravelMode("flights")}
+                    label="Flights"
+                    icon={
+                      <Plane
+                        size={24}
+                        className={travelMode === "flights" ? "text-paytm-cyan" : "text-gray-400"}
+                        fill={travelMode === "flights" ? "currentColor" : "none"}
+                      />
+                    }
+                  />
+                  <TabButton
+                    active={travelMode === "bus"}
+                    onClick={() => setTravelMode("bus")}
+                    label="Bus"
+                    icon={<Bus size={24} className={travelMode === "bus" ? "text-paytm-cyan" : "text-gray-400"} />}
+                  />
+                  <TabButton
+                    active={travelMode === "trains"}
+                    onClick={() => setTravelMode("trains")}
+                    label="Trains"
+                    icon={<Train size={24} className={travelMode === "trains" ? "text-paytm-cyan" : "text-gray-400"} />}
+                  />
+                  <TabButton
+                    active={travelMode === "intl"}
+                    onClick={() => setTravelMode("intl")}
+                    label="Intl. Flights"
+                    icon={<Globe size={24} className={travelMode === "intl" ? "text-paytm-cyan" : "text-gray-400"} />}
+                  />
+                </div>
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="hidden sm:flex text-xl font-bold tracking-tight">
+                    <span className="text-paytm-navy">paytm</span>
+                    <span className="text-black">travel</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={closeTravelModal}
+                    className="p-2 rounded-full text-gray-500 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+                    aria-label="Close"
+                  >
+                    <X size={22} />
+                  </button>
+                </div>
+              </div>
 
-             {/* Booking Form Layout */}
-             <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-end w-full">
-               
-               <div className="relative border border-gray-200 md:border-t-0 md:border-b-0 md:border-l-0 md:border-r flex-1 px-4 py-2 md:pl-0 rounded-lg md:rounded-none">
-                 <div className="flex-1">
-                   <div className="text-[11px] text-gray-400 uppercase font-semibold mb-1 tracking-wider">From</div>
-                   <input type="text" defaultValue="Delhi (DEL)" className="text-lg sm:text-xl font-bold text-gray-900 w-full outline-none bg-transparent" />
-                 </div>
-                 
-                 {/* Swap Icon */}
-                 <div className="absolute top-1/2 md:top-[60%] -right-4 transform -translate-y-1/2 bg-white rounded-full p-1.5 border border-gray-200 z-10 shadow-sm cursor-pointer hover:rotate-180 transition-transform hidden md:block">
-                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                      <path d="M7 16V4M7 4L3 8M7 4L11 8M17 8V20M17 20L21 16M17 20L13 16" stroke="#00B9F1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                   </svg>
-                 </div>
-               </div>
+              {travelMode === null && (
+                <p className="text-center text-gray-500 text-sm py-10 px-4">
+                  Choose Flights, Bus, Trains, or Intl. Flights above to continue.
+                </p>
+              )}
 
-               <div className="border border-gray-200 md:border-t-0 md:border-b-0 md:border-l-0 md:border-r flex-1 px-4 py-2 md:pl-4 rounded-lg md:rounded-none">
-                 <div className="text-[11px] text-gray-400 uppercase font-semibold mb-1 tracking-wider">To</div>
-                 <input type="text" defaultValue="Mumbai (BOM)" className="text-lg sm:text-xl font-bold text-gray-900 w-full outline-none bg-transparent" />
-               </div>
+              {travelMode !== null && (
+                <div className="border border-paytm-border rounded-xl p-4 sm:p-5 shadow-sm bg-white pt-6">
+                  <div className="flex gap-6 mb-6">
+                    <label
+                      className={`flex items-center gap-2 text-sm sm:text-base font-medium cursor-pointer transition-colors ${tripType === "one-way" ? "text-gray-900" : "text-gray-500"}`}
+                      onClick={() => setTripType("one-way")}
+                    >
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${tripType === "one-way" ? "border-paytm-cyan" : "border-gray-300"}`}
+                      >
+                        {tripType === "one-way" && (
+                          <div className="w-2.5 h-2.5 bg-paytm-cyan rounded-full animate-in zoom-in" />
+                        )}
+                      </div>
+                      One Way
+                    </label>
+                    <label
+                      className={`flex items-center gap-2 text-sm sm:text-base font-medium cursor-pointer transition-colors ${tripType === "round-trip" ? "text-gray-900" : "text-gray-500"}`}
+                      onClick={() => setTripType("round-trip")}
+                    >
+                      <div
+                        className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${tripType === "round-trip" ? "border-paytm-cyan" : "border-gray-300"}`}
+                      >
+                        {tripType === "round-trip" && (
+                          <div className="w-2.5 h-2.5 bg-paytm-cyan rounded-full animate-in zoom-in" />
+                        )}
+                      </div>
+                      Round Trip
+                    </label>
+                  </div>
 
-               <div className="border border-gray-200 md:border-t-0 md:border-b-0 md:border-l-0 md:border-r flex-1 px-4 py-2 md:pl-4 rounded-lg md:rounded-none">
-                 <div className="text-[11px] text-gray-400 uppercase font-semibold mb-1 tracking-wider">Depart</div>
-                 <input type="text" defaultValue="Tue, 07 Apr 26" className="text-base sm:text-lg font-bold text-gray-900 cursor-pointer hover:text-paytm-cyan transition-colors outline-none bg-transparent w-full" />
-               </div>
+                  <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-end w-full">
+                    <div className="relative border border-gray-200 md:border-t-0 md:border-b-0 md:border-l-0 md:border-r flex-1 px-4 py-2 md:pl-0 rounded-lg md:rounded-none">
+                      <div className="flex-1">
+                        <div className="text-[11px] text-gray-400 uppercase font-semibold mb-1 tracking-wider">
+                          From
+                        </div>
+                        <input
+                          type="text"
+                          defaultValue="Delhi (DEL)"
+                          className="text-lg sm:text-xl font-bold text-gray-900 w-full outline-none bg-transparent"
+                        />
+                      </div>
+                      <div className="absolute top-1/2 md:top-[60%] -right-4 transform -translate-y-1/2 bg-white rounded-full p-1.5 border border-gray-200 z-10 shadow-sm cursor-pointer hover:rotate-180 transition-transform hidden md:block">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path
+                            d="M7 16V4M7 4L3 8M7 4L11 8M17 8V20M17 20L21 16M17 20L13 16"
+                            stroke="#00B9F1"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </div>
+                    </div>
 
-               {tripType === "round-trip" && (
-                 <div className="border border-gray-200 md:border-t-0 md:border-b-0 md:border-l-0 md:border-r flex-1 px-4 py-2 md:pl-4 rounded-lg md:rounded-none animate-in fade-in slide-in-from-left-4">
-                   <div className="text-[11px] text-gray-500 uppercase font-bold mb-1 tracking-wider">Return</div>
-                   <input type="text" placeholder="Add Return" className="text-base sm:text-lg font-bold text-paytm-cyan cursor-pointer transition-colors outline-none bg-transparent w-full" />
-                 </div>
-               )}
+                    <div className="border border-gray-200 md:border-t-0 md:border-b-0 md:border-l-0 md:border-r flex-1 px-4 py-2 md:pl-4 rounded-lg md:rounded-none">
+                      <div className="text-[11px] text-gray-400 uppercase font-semibold mb-1 tracking-wider">
+                        To
+                      </div>
+                      <input
+                        type="text"
+                        defaultValue="Mumbai (BOM)"
+                        className="text-lg sm:text-xl font-bold text-gray-900 w-full outline-none bg-transparent"
+                      />
+                    </div>
 
-               <div className="border border-gray-200 md:border-transparent flex-1 px-4 py-2 md:pl-4 rounded-lg md:rounded-none mb-0 md:mb-0">
-                 <div className="flex-1">
-                   <div className="text-[11px] text-gray-400 uppercase font-semibold mb-1 tracking-wider">Passenger</div>
-                   <div className="text-base sm:text-lg font-bold text-gray-900 truncate">
-                     1 Traveller
-                   </div>
-                 </div>
-               </div>
-               
-               <button 
-                 onClick={() => router.push(travelMode === "intl" ? "/intl-flights" : `/${travelMode}`)}
-                 className="bg-[#00baec] hover:bg-[#00a8d6] transition-colors text-white font-bold py-3.5 px-6 rounded-xl flex-shrink-0 w-full md:w-auto shadow-md text-base sm:text-lg mt-4 md:mt-0 active:scale-95"
-               >
-                  Search {travelMode === "intl" ? "International Flights" : travelMode.charAt(0).toUpperCase() + travelMode.slice(1)}
-               </button>
-               
-             </div>
-             
+                    <div className="border border-gray-200 md:border-t-0 md:border-b-0 md:border-l-0 md:border-r flex-1 px-4 py-2 md:pl-4 rounded-lg md:rounded-none">
+                      <div className="text-[11px] text-gray-400 uppercase font-semibold mb-1 tracking-wider">
+                        Depart
+                      </div>
+                      <input
+                        type="text"
+                        defaultValue="Tue, 07 Apr 26"
+                        className="text-base sm:text-lg font-bold text-gray-900 cursor-pointer hover:text-paytm-cyan transition-colors outline-none bg-transparent w-full"
+                      />
+                    </div>
+
+                    {tripType === "round-trip" && (
+                      <div className="border border-gray-200 md:border-t-0 md:border-b-0 md:border-l-0 md:border-r flex-1 px-4 py-2 md:pl-4 rounded-lg md:rounded-none animate-in fade-in slide-in-from-left-4">
+                        <div className="text-[11px] text-gray-500 uppercase font-bold mb-1 tracking-wider">Return</div>
+                        <input
+                          type="text"
+                          placeholder="Add Return"
+                          className="text-base sm:text-lg font-bold text-paytm-cyan cursor-pointer transition-colors outline-none bg-transparent w-full"
+                        />
+                      </div>
+                    )}
+
+                    <div className="border border-gray-200 md:border-transparent flex-1 px-4 py-2 md:pl-4 rounded-lg md:rounded-none mb-0 md:mb-0">
+                      <div className="flex-1">
+                        <div className="text-[11px] text-gray-400 uppercase font-semibold mb-1 tracking-wider">
+                          Passenger
+                        </div>
+                        <div className="text-base sm:text-lg font-bold text-gray-900 truncate">1 Traveller</div>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        closeTravelModal();
+                        router.push(travelMode === "intl" ? "/intl-flights" : `/${travelMode}`);
+                      }}
+                      className="bg-[#00baec] hover:bg-[#00a8d6] transition-colors text-white font-bold py-3.5 px-6 rounded-xl flex-shrink-0 w-full md:w-auto shadow-md text-base sm:text-lg mt-4 md:mt-0 active:scale-95"
+                    >
+                      Search{" "}
+                      {travelMode === "intl"
+                        ? "International Flights"
+                        : travelMode.charAt(0).toUpperCase() + travelMode.slice(1)}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
       </div>
     </div>

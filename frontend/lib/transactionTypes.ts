@@ -7,9 +7,12 @@ export type TransactionRecord = {
   status: string;
   date: string;
   metadata?: Record<string, unknown>;
+  ledger_account?: "CASH" | "BOND_PORTFOLIO";
+  ledger_entry_id?: string;
 };
 
 const TYPE_LABELS: Record<string, string> = {
+  WELCOME_BONUS: "Welcome Bonus",
   P2P_TRANSFER: "P2P Transfer",
   MOBILE_RECHARGE: "Mobile Recharge",
   DTH_RECHARGE: "DTH Recharge",
@@ -18,7 +21,7 @@ const TYPE_LABELS: Record<string, string> = {
   UTILITY_PAYMENT: "Utility Payment",
   BOND_PURCHASE: "Bond Purchase",
   BOND_TRANSFER: "Bond Transfer",
-  BOND_REDEMPTION: "Bond Redemption",
+  BOND_REDEMPTION: "Bond sale / redemption",
   BOND_MATURITY_SETTLEMENT: "Maturity Settlement",
   GENERIC: "Generic",
 };
@@ -37,6 +40,13 @@ const METADATA_LABELS: Record<string, string> = {
   recipient_mobile: "Recipient Mobile",
   amount_paise: "Amount (Paise)",
   target_type: "Target Type",
+  bond_id: "Bond ID",
+  bond_name: "Bond",
+  holding_id: "Holding ID",
+  principal_paise: "Principal",
+  interest_paise: "Interest",
+  payout_total_paise: "Total payout",
+  units: "Units",
 };
 
 const METADATA_ORDER: Record<string, string[]> = {
@@ -44,8 +54,27 @@ const METADATA_ORDER: Record<string, string[]> = {
   DTH_RECHARGE: ["provider", "dthNumber"],
   FASTAG_RECHARGE: ["bank", "vehicleNumber"],
   ELECTRICITY_BILL_PAYMENT: ["state", "board", "consumerNumber"],
-  P2P_TRANSFER: ["recipient_mobile", "amount_paise"],
+  P2P_TRANSFER: [
+    "sender_mobile",
+    "recipient_mobile",
+    "sender_user_id",
+    "recipient_user_id",
+    "amount_paise",
+  ],
+  BOND_PURCHASE: ["bond_name", "bond_id", "units", "amount_paise"],
+  BOND_REDEMPTION: ["bond_name", "bond_id", "holding_id", "principal_paise", "interest_paise", "payout_total_paise"],
 };
+
+function formatMetadataScalar(key: string, raw: unknown): string {
+  if (raw === null || raw === undefined) return "";
+  if (key.endsWith("_paise")) {
+    const n = typeof raw === "number" ? raw : Number(raw);
+    if (Number.isFinite(n)) {
+      return `₹${(n / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+  }
+  return String(raw);
+}
 
 export function formatTransactionType(type?: string): string {
   if (!type) return "Generic";
@@ -67,7 +96,7 @@ export function getMetadataRows(
   return finalKeys.map((key) => ({
     key,
     label: METADATA_LABELS[key] || key.replace(/([A-Z])/g, " $1").trim(),
-    value: String(metadata[key]),
+    value: formatMetadataScalar(key, metadata[key]),
   }));
 }
 
