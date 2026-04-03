@@ -47,6 +47,7 @@ const METADATA_LABELS: Record<string, string> = {
   interest_paise: "Interest",
   payout_total_paise: "Total payout",
   units: "Units",
+  accrued_interest_credited_paise: "Accrued interest (credited to sender)",
 };
 
 const METADATA_ORDER: Record<string, string[]> = {
@@ -63,6 +64,13 @@ const METADATA_ORDER: Record<string, string[]> = {
   ],
   BOND_PURCHASE: ["bond_name", "bond_id", "units", "amount_paise"],
   BOND_REDEMPTION: ["bond_name", "bond_id", "holding_id", "principal_paise", "interest_paise", "payout_total_paise"],
+  BOND_TRANSFER: [
+    "recipient_mobile",
+    "amount_paise",
+    "accrued_interest_credited_paise",
+    "recipient_holding_id",
+    "bond_id",
+  ],
 };
 
 function formatMetadataScalar(key: string, raw: unknown): string {

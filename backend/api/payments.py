@@ -1,5 +1,9 @@
-from fastapi import APIRouter, Depends
+from __future__ import annotations
+
 import json
+import re
+
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 from passlib.context import CryptContext
@@ -15,6 +19,26 @@ from core.transaction_types import TransactionTypes
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Welcome credit in paise (₹50,000) — stored as integer paise everywhere in ledger_entries.amount
+WELCOME_BONUS_PAISE = 5_000_000
+
+# Strip sender-only interest note from bond transfer descriptions for the recipient's ledger view.
+_BOND_TRANSFER_SENDER_INTEREST_SUFFIX = re.compile(
+    r" \(accrued interest ₹[\d.]+ credited to your balance\)$"
+)
+
+
+def _transaction_view_for_user(txn: Transaction, viewer_user_id: str, description: str, metadata: dict) -> tuple[str, dict]:
+    """Recipients must not see how much accrued interest was credited to the sender."""
+    md = dict(metadata) if metadata else {}
+    desc = description
+    if txn.transaction_type == TransactionTypes.BOND_TRANSFER and str(txn.user_id) != str(viewer_user_id):
+        md.pop("accrued_interest_credited_paise", None)
+        md.pop("slices", None)
+        desc = _BOND_TRANSFER_SENDER_INTEREST_SUFFIX.sub("", desc)
+    return desc, md
+
 
 def get_wallet(db: Session, user_id: str) -> LedgerAccount:
     """Gets or securely provisions a Main Wallet Asset account for a user."""
@@ -43,17 +67,62 @@ def get_wallet(db: Session, user_id: str) -> LedgerAccount:
         db.commit()
         db.refresh(wallet)
         
-        # Inject 50,000 INR natively to test network
-        txn = Transaction(user_id=user_id, description="Welcome Bonus Initialization", status=TransactionStatus.COMPLETED)
+        # Inject welcome balance (double-entry when System Reserve exists — mirrors seed pattern)
+        txn = Transaction(
+            user_id=user_id,
+            description="Welcome Bonus Initialization",
+            transaction_type="WELCOME_BONUS",
+            transaction_metadata=json.dumps(
+                {"amount_paise": WELCOME_BONUS_PAISE, "purpose": "new_main_wallet"}
+            ),
+            status=TransactionStatus.COMPLETED,
+        )
         db.add(txn)
         db.commit()
         db.refresh(txn)
-        
-        entry = LedgerEntry(transaction_id=txn.id, account_id=wallet.id, direction=EntryDirection.DEBIT, amount=5000000)
-        db.add(entry)
+
+        db.add(
+            LedgerEntry(
+                transaction_id=txn.id,
+                account_id=wallet.id,
+                direction=EntryDirection.DEBIT,
+                amount=WELCOME_BONUS_PAISE,
+            )
+        )
+        system_wallet = (
+            db.query(LedgerAccount)
+            .filter(
+                LedgerAccount.is_system == True,
+                LedgerAccount.account_type == AccountType.EQUITY,
+                LedgerAccount.name == "System Reserve",
+            )
+            .first()
+        )
+        if system_wallet:
+            db.add(
+                LedgerEntry(
+                    transaction_id=txn.id,
+                    account_id=system_wallet.id,
+                    direction=EntryDirection.CREDIT,
+                    amount=WELCOME_BONUS_PAISE,
+                )
+            )
         db.commit()
-        
+
     return wallet
+
+
+def get_bond_portfolio_ledger_account(db: Session, user_id: str) -> LedgerAccount | None:
+    return (
+        db.query(LedgerAccount)
+        .filter(
+            LedgerAccount.user_id == user_id,
+            LedgerAccount.name == "Bond Portfolio",
+            LedgerAccount.account_type == AccountType.ASSET,
+        )
+        .first()
+    )
+
 
 def calculate_balance(db: Session, account_id: str) -> int:
     """Calculates active balance mapping Asset properties natively."""
@@ -123,10 +192,16 @@ def execute_transfer(payload: TransferRequest, db: Session = Depends(get_db), cu
         result = execute_settlement_transaction(
             db=db,
             user_id=current_user.id, 
-            description=f"P2P Transfer to {recipient_num}",
+            description=f"P2P Transfer to +91 {recipient_num}",
             transaction_type=TransactionTypes.P2P,
             idempotency_key=payload.idempotency_key,
-            metadata={"recipient_mobile": recipient_num, "amount_paise": payload.amount_paise},
+            metadata={
+                "amount_paise": payload.amount_paise,
+                "recipient_mobile": recipient_num,
+                "recipient_user_id": recipient.id,
+                "sender_user_id": current_user.id,
+                "sender_mobile": current_user.mobile_number,
+            },
             entries=[
                 SettlementEntry(
                     account_id=sender_wallet.id,
@@ -158,23 +233,37 @@ def execute_transfer(payload: TransferRequest, db: Session = Depends(get_db), cu
 @router.get("/transactions")
 def get_transactions(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     wallet = get_wallet(db, current_user.id)
-    
-    entries = db.query(LedgerEntry, Transaction).join(
-        Transaction, LedgerEntry.transaction_id == Transaction.id
-    ).filter(
-        LedgerEntry.account_id == wallet.id
-    ).order_by(Transaction.posted_date.desc()).all()
-    
+    bond_acct = get_bond_portfolio_ledger_account(db, current_user.id)
+    account_ids = [wallet.id]
+    if bond_acct:
+        account_ids.append(bond_acct.id)
+
+    entries = (
+        db.query(LedgerEntry, Transaction)
+        .join(Transaction, LedgerEntry.transaction_id == Transaction.id)
+        .filter(LedgerEntry.account_id.in_(account_ids))
+        .order_by(Transaction.posted_date.desc(), LedgerEntry.id.desc())
+        .limit(200)
+        .all()
+    )
+
     results = []
     for entry, txn in entries:
-        results.append({
-            "id": txn.id,
-            "description": txn.description,
-            "transaction_type": txn.transaction_type,
-            "metadata": json.loads(txn.transaction_metadata) if txn.transaction_metadata else {},
-            "direction": entry.direction.value, # DEBIT (Money Received via Asset Increase), CREDIT (Money Sent via Asset Decrease)
-            "amount_inr": entry.amount / 100,
-            "status": txn.status.value,
-            "date": txn.posted_date.isoformat()
-        })
+        ledger_label = "CASH" if entry.account_id == wallet.id else "BOND_PORTFOLIO"
+        raw_md = json.loads(txn.transaction_metadata) if txn.transaction_metadata else {}
+        desc, md = _transaction_view_for_user(txn, current_user.id, txn.description or "", raw_md)
+        results.append(
+            {
+                "id": txn.id,
+                "description": desc,
+                "transaction_type": txn.transaction_type,
+                "metadata": md,
+                "direction": entry.direction.value,
+                "amount_inr": entry.amount / 100,
+                "status": txn.status.value,
+                "date": txn.posted_date.isoformat(),
+                "ledger_account": ledger_label,
+                "ledger_entry_id": entry.id,
+            }
+        )
     return {"transactions": results}

@@ -2,10 +2,12 @@ import json
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 from database.session import SessionLocal, engine, Base
+from database.migrations import ensure_bond_catalog_columns
 from models import *
 
 # Ensure tables are built natively
 Base.metadata.create_all(bind=engine)
+ensure_bond_catalog_columns(engine)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -33,15 +35,62 @@ def run_seed():
             db.commit()
             db.refresh(system_wallet)
             
-        # Ensure benchmark Treasury Bond is alive
-        benchmark_bond = db.query(Bond).filter(Bond.name == "SettleX Rapid Treasury Bond").first()
-        if not benchmark_bond:
-            # Setting extremely aggressive short maturity strictly for demonstration capabilities
-            benchmark_bond = Bond(name="SettleX Rapid Treasury Bond", apy_rate=15.0, maturity_seconds=60)
-            db.add(benchmark_bond)
+        default_bonds = [
+            {
+                "name": "SettleX Rapid Treasury Bond",
+                "isin": "INE0SETX0001",
+                "credit_rating": "AAA",
+                "apy_rate": 15.0,
+                "ytm_rate": 14.75,
+                "maturity_seconds": 60,
+                "face_value_paise": 10000,
+            },
+            {
+                "name": "Sovereign SDL 91D (Simulated)",
+                "isin": "INE0SDL91D01",
+                "credit_rating": "AAA",
+                "apy_rate": 7.25,
+                "ytm_rate": 7.1,
+                "maturity_seconds": 86400,
+                "face_value_paise": 100000,
+            },
+            {
+                "name": "PSU Credit Note (Simulated)",
+                "isin": "INE0PSUCRD01",
+                "credit_rating": "AA+",
+                "apy_rate": 8.5,
+                "ytm_rate": 8.62,
+                "maturity_seconds": 172800,
+                "face_value_paise": 50000,
+            },
+        ]
+        bonds_to_seed = config.get("bonds") or default_bonds
+        for b in bonds_to_seed:
+            if db.query(Bond).filter(Bond.isin == b["isin"]).first():
+                continue
+            db.add(
+                Bond(
+                    name=b["name"],
+                    isin=b["isin"],
+                    credit_rating=b["credit_rating"],
+                    apy_rate=float(b["apy_rate"]),
+                    ytm_rate=float(b["ytm_rate"]),
+                    maturity_seconds=int(b["maturity_seconds"]),
+                    face_value_paise=int(b["face_value_paise"]),
+                    is_active=True,
+                )
+            )
             db.commit()
             
-        for acc in config.get("accounts", []):
+        accounts = config.get("accounts") or []
+        if not accounts:
+            print(
+                "[INFO] No accounts in seedconfig.json — only bonds/system are seeded.\n"
+                "       Create real users via the app (OTP), then set a transaction PIN on Payments.\n"
+                "       First Main Wallet access grants a welcome balance (see get_wallet in api/payments.py).\n"
+                "       Optional: add your mobiles under \"accounts\" with pin + starting_balance_paise to seed funded users."
+            )
+        for acc in accounts:
             mobile = acc["mobile_number"]
             # Check if user already exists
             user = db.query(User).filter(User.mobile_number == mobile).first()

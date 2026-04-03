@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useSession } from "next-auth/react";
 import {
   Smartphone,
   Tv,
@@ -15,15 +17,87 @@ import {
   Globe,
   ArrowRight,
   X,
+  TrendingUp,
+  PiggyBank,
+  Loader2,
+  ChevronRight,
 } from "lucide-react";
 
 type TravelMode = "flights" | "bus" | "trains" | "intl";
 
+type PortfolioSummary = {
+  total_principal_inr: number;
+  total_accrued_interest_inr: number;
+  total_position_value_inr: number;
+  active_holdings_count: number;
+};
+
+type HoldingRow = {
+  id: string;
+  bond_name: string;
+  isin: string;
+  ytm_rate: number;
+  credit_rating: string;
+  units: number;
+  principal_inr: number;
+  accrued_interest_inr: number;
+  apy: number;
+  status: string;
+  purchased_at: string;
+  maturity_at: string;
+};
+
 export default function Home() {
   const router = useRouter();
+  const { data: session, status: authStatus } = useSession();
   const [travelModalOpen, setTravelModalOpen] = useState(false);
   const [travelMode, setTravelMode] = useState<TravelMode | null>(null);
   const [tripType, setTripType] = useState<"one-way" | "round-trip">("one-way");
+  const [treasuryLoading, setTreasuryLoading] = useState(false);
+  const [treasuryHoldings, setTreasuryHoldings] = useState<HoldingRow[]>([]);
+  const [treasurySummary, setTreasurySummary] = useState<PortfolioSummary | null>(null);
+
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000/api/v1";
+
+  const fetchTreasurySnapshot = useCallback(
+    async (silent = false) => {
+      if (!session?.user?.api_token) return;
+      if (!silent) setTreasuryLoading(true);
+      try {
+        const res = await fetch(`${apiBase}/bonds/portfolio`, {
+          headers: { Authorization: `Bearer ${session.user.api_token}` },
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        setTreasuryHoldings(data.holdings || []);
+        const s = data.summary;
+        if (s && typeof s.total_position_value_inr === "number") {
+          setTreasurySummary({
+            total_principal_inr: s.total_principal_inr ?? 0,
+            total_accrued_interest_inr: s.total_accrued_interest_inr ?? 0,
+            total_position_value_inr: s.total_position_value_inr ?? 0,
+            active_holdings_count: s.active_holdings_count ?? 0,
+          });
+        } else {
+          setTreasurySummary(null);
+        }
+      } finally {
+        setTreasuryLoading(false);
+      }
+    },
+    [session?.user?.api_token, apiBase]
+  );
+
+  useEffect(() => {
+    if (authStatus !== "authenticated" || !session?.user?.api_token) {
+      setTreasuryHoldings([]);
+      setTreasurySummary(null);
+      return;
+    }
+    fetchTreasurySnapshot();
+    const t = setInterval(() => fetchTreasurySnapshot(true), 60_000);
+    return () => clearInterval(t);
+  }, [authStatus, session?.user?.api_token, fetchTreasurySnapshot]);
 
   const openTravelModal = useCallback(() => {
     setTravelMode(null);
@@ -52,10 +126,165 @@ export default function Home() {
     alert(`Mock integration: ${feature} initiated.`);
   };
 
+  const activeHomeHoldings = treasuryHoldings.filter(
+    (h) => h.status === "ACTIVE" || h.status === "MATURED_PENDING_SETTLEMENT"
+  );
+
   return (
     <div className="w-full bg-paytm-bg min-h-screen pb-20">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 sm:pt-8 space-y-6">
-        
+        {/* Treasury — bond portfolio snapshot */}
+        <section className="bg-gradient-to-br from-[#002970] via-[#003580] to-[#001a4d] rounded-3xl p-6 sm:p-8 shadow-lg border border-white/10 text-white relative overflow-hidden">
+          <div className="absolute -right-16 -top-16 w-56 h-56 rounded-full bg-[#00baf2]/10 pointer-events-none" />
+          <div className="absolute -left-8 bottom-0 w-40 h-40 rounded-full bg-white/5 pointer-events-none" />
+          <div className="relative flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6">
+            <div className="flex items-center gap-3">
+              <div className="p-3 rounded-2xl bg-white/10 border border-white/10">
+                <PiggyBank className="w-7 h-7 text-[#00baf2]" strokeWidth={1.5} />
+              </div>
+              <div>
+                <h2 className="text-xl sm:text-2xl font-bold tracking-tight">Your Treasury</h2>
+                <p className="text-sm text-white/70 font-medium mt-0.5">
+                  Bond holdings, principal, accrued interest &amp; status
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/treasury"
+              className="inline-flex items-center justify-center gap-1.5 bg-[#00baf2] hover:bg-[#00a5d9] text-white font-bold text-sm px-5 py-2.5 rounded-full transition-colors shrink-0"
+            >
+              Full treasury
+              <ChevronRight className="w-4 h-4" />
+            </Link>
+          </div>
+
+          {authStatus === "loading" && (
+            <div className="flex items-center gap-2 text-white/80 text-sm py-6">
+              <Loader2 className="w-5 h-5 animate-spin text-[#00baf2]" />
+              Loading portfolio…
+            </div>
+          )}
+
+          {authStatus === "unauthenticated" && (
+            <p className="text-sm text-white/80 font-medium py-2">
+              Sign in to see your bond portfolio, buy bonds, and track accrued interest. Open the account menu above to
+              continue.
+            </p>
+          )}
+
+          {authStatus === "authenticated" && (
+            <>
+              {treasuryLoading && treasuryHoldings.length === 0 && !treasurySummary ? (
+                <div className="flex items-center gap-2 text-white/80 text-sm py-4">
+                  <Loader2 className="w-5 h-5 animate-spin text-[#00baf2]" />
+                  Loading your bonds…
+                </div>
+              ) : (
+                <>
+                  {treasurySummary && (
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6">
+                      <div className="rounded-2xl bg-white/10 border border-white/10 p-4">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-[#00baf2]/90 mb-1">
+                          Total value
+                        </p>
+                        <p className="text-lg sm:text-xl font-black tabular-nums">
+                          ₹
+                          {treasurySummary.total_position_value_inr.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 4,
+                          })}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-white/10 border border-white/10 p-4">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-white/60 mb-1">Principal</p>
+                        <p className="text-base sm:text-lg font-bold tabular-nums">
+                          ₹
+                          {treasurySummary.total_principal_inr.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                          })}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-white/10 border border-white/10 p-4">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-white/60 mb-1">Accrued</p>
+                        <p className="text-base sm:text-lg font-bold text-emerald-300 tabular-nums">
+                          ₹
+                          {treasurySummary.total_accrued_interest_inr.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 4,
+                          })}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-white/10 border border-white/10 p-4">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-white/60 mb-1">Active</p>
+                        <p className="text-base sm:text-lg font-bold">{treasurySummary.active_holdings_count}</p>
+                        <p className="text-[10px] text-white/50 mt-0.5">positions</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeHomeHoldings.length === 0 ? (
+                    <div className="rounded-2xl border border-dashed border-white/25 bg-white/5 p-6 text-center">
+                      <TrendingUp className="w-10 h-10 text-[#00baf2]/80 mx-auto mb-3" strokeWidth={1.25} />
+                      <p className="font-bold text-white mb-1">No active bond positions yet</p>
+                      <p className="text-sm text-white/65 mb-4">Allocate to treasury bonds from the full treasury page.</p>
+                      <Link
+                        href="/treasury"
+                        className="inline-flex items-center gap-1 text-[#00baf2] font-bold text-sm hover:underline"
+                      >
+                        Go to Treasury <ChevronRight className="w-4 h-4" />
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-xs font-bold uppercase tracking-wider text-white/50">Your positions</p>
+                      <div className="space-y-2 max-h-[min(420px,50vh)] overflow-y-auto pr-1 -mr-1">
+                        {activeHomeHoldings.map((h) => (
+                          <div
+                            key={h.id}
+                            className="rounded-2xl bg-white/10 border border-white/10 p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
+                          >
+                            <div className="min-w-0">
+                              <p className="font-bold text-white truncate">{h.bond_name}</p>
+                              <p className="text-xs text-white/60 mt-0.5 font-medium">
+                                {h.isin} · {h.credit_rating} · {h.units} units · {h.apy}% APY · YTM {h.ytm_rate}%
+                              </p>
+                              <p className="text-[11px] text-white/45 mt-1">
+                                Maturity {new Date(h.maturity_at).toLocaleDateString("en-IN", { dateStyle: "medium" })}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-4 sm:gap-6 shrink-0 text-sm">
+                              <div>
+                                <span className="text-[10px] uppercase font-bold text-white/50 block">Principal</span>
+                                <span className="font-bold tabular-nums">
+                                  ₹{h.principal_inr.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] uppercase font-bold text-emerald-400/80 block">Accrued</span>
+                                <span className="font-bold text-emerald-300 tabular-nums">
+                                  ₹
+                                  {h.accrued_interest_inr.toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 4,
+                                  })}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-[10px] uppercase font-bold text-white/50 block">Status</span>
+                                <span className="font-bold text-[#00baf2] text-xs tracking-wide">{h.status}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </section>
+
         {/* Top Section - Recharges & Bill Payments AND Right Banner */}
         <div className="flex flex-col lg:flex-row gap-6">
           

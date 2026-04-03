@@ -1,28 +1,32 @@
 {
-  "accounts": [
+  "bonds": [
     {
-      "mobile_number": "9999999991",
-      "business_name": "Alice Retail",
-      "pin": "1234",
-      "starting_balance_paise": 1500000
+      "name": "SettleX Rapid Treasury Bond",
+      "isin": "INE0SETX0001",
+      "credit_rating": "AAA",
+      "apy_rate": 15.0,
+      "ytm_rate": 14.75,
+      "maturity_seconds": 60,
+      "face_value_paise": 10000
     },
     {
-      "mobile_number": "9999999992",
-      "business_name": "Bob Wholesale",
-      "pin": "1234",
-      "starting_balance_paise": 5500000
+      "name": "Sovereign SDL 91D (Simulated)",
+      "isin": "INE0SDL91D01",
+      "credit_rating": "AAA",
+      "apy_rate": 7.25,
+      "ytm_rate": 7.1,
+      "maturity_seconds": 86400,
+      "face_value_paise": 100000
     },
     {
-      "mobile_number": "9999999993",
-      "business_name": "Charlie Logistics",
-      "pin": "1234",
-      "starting_balance_paise": 250000
-    },
-    {
-      "mobile_number": "7503839579",
-      "business_name": "Ujjwal Kakar",
-      "pin": "1232",
-      "starting_balance_paise": 250000
+      "name": "PSU Credit Note (Simulated)",
+      "isin": "INE0PSUCRD01",
+      "credit_rating": "AA+",
+      "apy_rate": 8.5,
+      "ytm_rate": 8.62,
+      "maturity_seconds": 172800,
+      "face_value_paise": 50000
     }
-  ]
+  ],
+  "accounts": []
 }
