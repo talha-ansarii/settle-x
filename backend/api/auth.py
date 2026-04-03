@@ -13,6 +13,16 @@ from schemas.auth import OtpRequest, OtpVerify, TokenWithUser
 
 router = APIRouter()
 
+
+def _print_dev_otp_to_terminal(mobile: str, otp_code: str) -> None:
+    """Local/Twilio-off mode only: OTP is shown here because SMS is not used."""
+    line = "=" * 56
+    print(f"\n{line}", flush=True)
+    print(f"  DEV OTP CODE:  {otp_code}", flush=True)
+    print(f"  mobile:        {mobile}", flush=True)
+    print(f"{line}\n", flush=True)
+
+
 @router.post("/request-otp")
 def request_otp(payload: OtpRequest, db: Session = Depends(get_db)):
     mobile = payload.mobile_number.replace("+91", "").replace(" ", "")
@@ -21,9 +31,8 @@ def request_otp(payload: OtpRequest, db: Session = Depends(get_db)):
     # --- OFFLINE / FALLBACK MODE ---
     if not settings.TWILIO_VERIFY_SERVICE_SID or not settings.TWILIO_ACCOUNT_SID:
         otp_code = str(random.randint(100000, 999999))
-        print(f"[LOCAL TEST LOG] Simulating Local OTP: {otp_code} to {formatted_number}")
+        _print_dev_otp_to_terminal(mobile, otp_code)
         db.query(OtpSession).filter(OtpSession.mobile_number == mobile).delete()
-        print("OTP: ", otp_code)
         session_record = OtpSession(
             mobile_number=mobile,
             otp_code=otp_code,
@@ -42,7 +51,7 @@ def request_otp(payload: OtpRequest, db: Session = Depends(get_db)):
             .verifications \
             .create(to=formatted_number, channel='sms')
             
-        print(f"Twilio Verify API Success! Status code: {verification.status}")
+        print(f"Twilio Verify API Success! Status: {verification.status} (OTP sent via SMS only; not visible to server)")
         return {"message": "OTP sent successfully via Twilio Verify", "status": verification.status}
     except Exception as e:
         print(f"Twilio Verify API Error: {str(e)}")

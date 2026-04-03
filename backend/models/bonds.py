@@ -13,6 +13,11 @@ class Bond(Base):
     maturity_seconds = Column(Integer, nullable=False) # For demo hacking, seconds instead of days
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    # Catalog / off-market simulation (demo ISIN & rating — not real securities)
+    isin = Column(String, nullable=False, default="")
+    credit_rating = Column(String, nullable=False, default="NR")
+    ytm_rate = Column(Float, nullable=False, default=0.0)  # display YTM % for simulator
+    face_value_paise = Column(Integer, nullable=False, default=10_000)  # nominal per 1 unit (₹100 default)
 
 class HoldingStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
@@ -32,6 +37,10 @@ class BondHolding(Base):
     # Allows us to definitively lock time logic when the user mathematically stops accumulating interest on this block!
     transferred_or_matured_at = Column(DateTime, nullable=True) 
     status = Column(Enum(HoldingStatus), default=HoldingStatus.ACTIVE)
+    units = Column(Integer, nullable=False, default=1)
+    cost_basis_paise = Column(Integer, nullable=False, default=0)  # original outlay for P&L
+    realized_interest_paise = Column(Integer, nullable=False, default=0)  # interest paid to cash
+    origin_holding_id = Column(String(36), ForeignKey("bond_holdings.id"), nullable=True, index=True)
 
 
 class BondEventType(str, enum.Enum):

@@ -104,6 +104,7 @@ type TransferReceipt = {
   bond: { name: string; isin: string; ytm_rate: number; credit_rating: string };
   principal_inr: number;
   units: number | null;
+  accrued_interest_credited_inr?: number;
   sender_mobile_masked: string;
   recipient_mobile_masked: string;
   kind: string;
@@ -132,7 +133,8 @@ export default function TreasuryPage() {
   const [expandedHoldingId, setExpandedHoldingId] = useState<string | null>(null);
   const [holdingDetail, setHoldingDetail] = useState<HoldingDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [transferHoldingId, setTransferHoldingId] = useState<string | null>(null);
+  const [transferModal, setTransferModal] = useState<null | "by_amount" | { holdingId: string }>(null);
+  const [transferAmountInr, setTransferAmountInr] = useState("");
   const [transferMobile, setTransferMobile] = useState("");
   const [transferPin, setTransferPin] = useState("");
   const [transferLoading, setTransferLoading] = useState(false);
@@ -200,7 +202,7 @@ export default function TreasuryPage() {
     }
     const interval = setInterval(() => {
       if (status === "authenticated") fetchPortfolio(true);
-    }, 1000);
+    }, 60_000);
     return () => clearInterval(interval);
   }, [status, session?.user?.api_token]);
 
@@ -338,9 +340,26 @@ export default function TreasuryPage() {
 
   const handleOffMarketTransfer = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!transferHoldingId || !session?.user?.api_token) return;
+    if (!transferModal || !session?.user?.api_token) return;
     setTransferLoading(true);
     setTxMsg({ text: "", type: "" });
+    const body: Record<string, unknown> = {
+      recipient_mobile: transferMobile.replace(/\s/g, ""),
+      pin: transferPin,
+      idempotency_key: `omt_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
+    };
+    if (transferModal === "by_amount") {
+      const n = Number(transferAmountInr.replace(/,/g, "").trim());
+      const paise = Math.round(n * 100);
+      if (!Number.isFinite(paise) || paise <= 0) {
+        setTxMsg({ text: "Enter a valid amount in rupees.", type: "error" });
+        setTransferLoading(false);
+        return;
+      }
+      body.amount_paise = paise;
+    } else {
+      body.holding_id = transferModal.holdingId;
+    }
     try {
       const res = await fetch(`${apiBase}/bonds/transfer`, {
         method: "POST",
@@ -348,12 +367,7 @@ export default function TreasuryPage() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.user.api_token}`,
         },
-        body: JSON.stringify({
-          holding_id: transferHoldingId,
-          recipient_mobile: transferMobile.replace(/\s/g, ""),
-          pin: transferPin,
-          idempotency_key: `omt_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (res.ok) {
@@ -361,7 +375,8 @@ export default function TreasuryPage() {
         setLastTransferTxId(data.transaction_id);
         setTransferPin("");
         setTransferMobile("");
-        setTransferHoldingId(null);
+        setTransferAmountInr("");
+        setTransferModal(null);
         fetchPortfolio(true);
         if (data.transaction_id) loadReceipt(data.transaction_id);
       } else {
@@ -569,14 +584,39 @@ export default function TreasuryPage() {
                     <p key={r}>• {r}</p>
                   ))}
                 </div>
-                <button
-                  type="button"
-                  onClick={handleLoadAudit}
-                  disabled={loadingAudit}
-                  className="w-full bg-[#002970] hover:bg-blue-900 text-white text-sm font-semibold py-2.5 rounded-xl disabled:opacity-50"
-                >
-                  {loadingAudit ? "Loading Audit…" : "View Audit Trail"}
-                </button>
+            <button
+              type="button"
+              onClick={handleLoadAudit}
+              disabled={loadingAudit}
+              className="w-full bg-[#002970] hover:bg-blue-900 text-white text-sm font-semibold py-2.5 rounded-xl disabled:opacity-50"
+            >
+              {loadingAudit ? "Loading Audit…" : "View Audit Trail"}
+            </button>
+            <div className="mt-4 pt-4 border-t border-gray-100">
+              <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Off-market transfer</p>
+              <p className="text-xs text-gray-600 mb-3">
+                Send a rupee total in one payment. The system uses your holdings in order (FIFO) in whole face-value
+                units per bond. Accrued interest on the transferred principal is credited to your available balance.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setTransferModal("by_amount");
+                  setTransferAmountInr("");
+                  setTransferMobile("");
+                  setTransferPin("");
+                  setTxMsg({ text: "", type: "" });
+                }}
+                className="w-full bg-[#00baf2] hover:bg-[#00a3d4] text-white text-sm font-bold py-3 rounded-xl flex items-center justify-center gap-2"
+              >
+                <SendHorizontal size={16} />
+                Custom amount (bonds)
+              </button>
+              <p className="text-[11px] text-gray-400 mt-2">
+                Transferrable principal (active): ₹
+                {portfolioSummary.total_principal_inr.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </p>
+            </div>
                 {recommendationAudit && (
                   <div className="border border-gray-100 rounded-xl p-3 bg-gray-50 text-xs text-gray-700 space-y-1">
                     <p>
@@ -621,6 +661,15 @@ export default function TreasuryPage() {
                     Principal ₹{receipt.principal_inr.toLocaleString("en-IN", { minimumFractionDigits: 2 })} · Units{" "}
                     {receipt.units ?? "—"}
                   </p>
+                  {(receipt.accrued_interest_credited_inr ?? 0) > 0 && (
+                    <p className="text-emerald-700 font-semibold">
+                      Accrued interest credited to sender (available balance): ₹
+                      {receipt.accrued_interest_credited_inr!.toLocaleString("en-IN", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 4,
+                      })}
+                    </p>
+                  )}
                   <p className="text-xs text-gray-500">
                     {receipt.sender_mobile_masked} → {receipt.recipient_mobile_masked}
                   </p>
@@ -651,6 +700,36 @@ export default function TreasuryPage() {
               <div className={`p-2 rounded-full ${isRefreshing ? "bg-gray-100 text-[#00baf2]" : "text-gray-300"}`}>
                 <RefreshCw size={18} className={isRefreshing ? "animate-spin" : ""} />
               </div>
+            </div>
+
+            <div className="mb-8 rounded-2xl border border-[#00baf2]/30 bg-gradient-to-r from-[#f0fbff] to-white p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="min-w-0">
+                <p className="text-sm font-black text-[#002970] flex items-center gap-2">
+                  <SendHorizontal className="text-[#00baf2] shrink-0" size={18} />
+                  Transfer bonds — custom amount
+                </p>
+                <p className="text-xs text-gray-600 mt-1.5 leading-relaxed">
+                  Send a specific rupee total of bond principal in <span className="font-semibold">one</span> payment.
+                  Holdings are used oldest-first in whole face-value units. Accrued interest on what you move is credited
+                  to your available balance. Max you can route: ₹
+                  {portfolioSummary.total_principal_inr.toLocaleString("en-IN", { minimumFractionDigits: 2 })} (active
+                  principal).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setTransferModal("by_amount");
+                  setTransferAmountInr("");
+                  setTransferMobile("");
+                  setTransferPin("");
+                  setTxMsg({ text: "", type: "" });
+                }}
+                className="shrink-0 bg-[#002970] hover:bg-blue-900 text-white text-sm font-bold px-5 py-3 rounded-xl shadow-md flex items-center justify-center gap-2"
+              >
+                <SendHorizontal size={16} />
+                Custom amount transfer
+              </button>
             </div>
 
             {holdings.length === 0 ? (
@@ -701,7 +780,7 @@ export default function TreasuryPage() {
                         </div>
                         <div className="bg-[#002970] p-3 rounded-xl shadow-inner relative overflow-hidden">
                           <div
-                            className="absolute right-0 top-0 h-full bg-[#00baf2]/20 transition-all duration-1000 ease-linear"
+                            className="absolute right-0 top-0 h-full bg-[#00baf2]/20 transition-all duration-1000 ease-out"
                             style={{ width: `${h.fraction_ticking * 100}%` }}
                           />
                           <p className="text-xs text-[#00baf2] font-semibold mb-1 uppercase tracking-widest relative z-10">
@@ -729,14 +808,16 @@ export default function TreasuryPage() {
                             <button
                               type="button"
                               onClick={() => {
-                                setTransferHoldingId(h.id);
+                                setTransferModal({ holdingId: h.id });
+                                setTransferAmountInr("");
                                 setTransferPin("");
+                                setTransferMobile("");
                                 setTxMsg({ text: "", type: "" });
                               }}
                               className="text-sm font-bold text-white bg-[#002970] flex items-center gap-1 px-3 py-2 rounded-lg hover:bg-blue-900"
                             >
                               <SendHorizontal size={16} />
-                              Off-market transfer (simulated)
+                              Transfer entire lot
                             </button>
                             <button
                               type="button"
@@ -805,14 +886,42 @@ export default function TreasuryPage() {
         title="Confirm sale — enter PIN"
       />
 
-      {transferHoldingId && (
+      {transferModal && (
         <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-black/40">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gray-100">
-            <h3 className="text-lg font-bold text-gray-900 mb-1">Off-market transfer (simulated)</h3>
+            <h3 className="text-lg font-bold text-gray-900 mb-1">
+              {transferModal === "by_amount" ? "Bond transfer — custom amount" : "Transfer entire lot"}
+            </h3>
             <p className="text-xs text-gray-500 mb-4">
-              Same bond position moves to another SettleX user. Requires your transaction PIN.
+              {transferModal === "by_amount" ? (
+                <>
+                  One payment for the rupee total you enter. Amount must be achievable using whole face-value units
+                  across your active holdings (oldest first). If it cannot be split that way, you will see an error.
+                  Accrued interest on the transferred principal goes to your available balance, not to the recipient.
+                </>
+              ) : (
+                <>
+                  Transfers this position&apos;s full principal. Accrued interest is credited to your available
+                  balance; the recipient receives principal only.
+                </>
+              )}
             </p>
             <form onSubmit={handleOffMarketTransfer} className="space-y-4">
+              {transferModal === "by_amount" && (
+                <div>
+                  <label className="text-xs font-semibold text-gray-500 uppercase">Amount to transfer (₹)</label>
+                  <input
+                    type="number"
+                    value={transferAmountInr}
+                    onChange={(e) => setTransferAmountInr(e.target.value)}
+                    placeholder="0.00"
+                    step="0.01"
+                    min="0.01"
+                    className="mt-1 w-full border border-gray-200 rounded-xl px-3 py-2 font-bold text-lg"
+                    required
+                  />
+                </div>
+              )}
               <div>
                 <label className="text-xs font-semibold text-gray-500 uppercase">Recipient mobile</label>
                 <input
@@ -838,7 +947,10 @@ export default function TreasuryPage() {
               <div className="flex gap-2 justify-end">
                 <button
                   type="button"
-                  onClick={() => setTransferHoldingId(null)}
+                  onClick={() => {
+                    setTransferModal(null);
+                    setTransferAmountInr("");
+                  }}
                   className="px-4 py-2 rounded-xl border border-gray-200 font-semibold text-gray-700"
                 >
                   Cancel
