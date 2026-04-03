@@ -18,6 +18,7 @@ class HoldingStatus(str, enum.Enum):
     ACTIVE = "ACTIVE"
     TRANSFERRED = "TRANSFERRED"
     MATURED = "MATURED"
+    SETTLED = "SETTLED"
 
 class BondHolding(Base):
     __tablename__ = "bond_holdings"
@@ -31,3 +32,24 @@ class BondHolding(Base):
     # Allows us to definitively lock time logic when the user mathematically stops accumulating interest on this block!
     transferred_or_matured_at = Column(DateTime, nullable=True) 
     status = Column(Enum(HoldingStatus), default=HoldingStatus.ACTIVE)
+
+
+class BondEventType(str, enum.Enum):
+    PURCHASED = "PURCHASED"
+    TRANSFER_OUT = "TRANSFER_OUT"
+    TRANSFER_IN = "TRANSFER_IN"
+    MATURED = "MATURED"
+    REDEEMED = "REDEEMED"
+    SETTLED = "SETTLED"
+
+
+class BondEvent(Base):
+    __tablename__ = "bond_events"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    holding_id = Column(String(36), ForeignKey("bond_holdings.id"), index=True, nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id"), index=True, nullable=False)
+    event_type = Column(Enum(BondEventType), nullable=False)
+    amount_paise = Column(Integer, nullable=False, default=0)
+    event_metadata = Column("metadata", String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
