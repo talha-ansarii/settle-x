@@ -1,6 +1,5 @@
-import math
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
@@ -10,6 +9,7 @@ from models.bonds import Bond, BondHolding, HoldingStatus
 from models.ledger import LedgerAccount, AccountType, Transaction, TransactionStatus, LedgerEntry, EntryDirection
 from api.deps import get_current_user
 from api.payments import get_wallet, calculate_balance
+from core.http import api_error
 
 router = APIRouter()
 
@@ -17,7 +17,7 @@ def get_optimal_bond(db: Session, amount_paise: int):
     # Currently hardcoded to extract the benchmark active bond as requested by the AI orchestrator spec
     bond = db.query(Bond).filter(Bond.is_active == True).first()
     if not bond:
-        raise HTTPException(status_code=404, detail="No active Treasury bonds available.")
+        api_error(404, "NO_ACTIVE_BONDS", "No active Treasury bonds available.")
     return bond
 
 def get_bond_portfolio_wallet(db: Session, user_id: str) -> LedgerAccount:
@@ -46,7 +46,7 @@ def buy_bond(payload: BuyRequest, db: Session = Depends(get_db), current_user: U
     cash_balance = calculate_balance(db, cash_wallet.id)
     
     if cash_balance < payload.amount_paise:
-        raise HTTPException(status_code=400, detail="Insufficient localized Cash Wallet bounds.")
+        api_error(400, "INSUFFICIENT_BALANCE", "Insufficient localized Cash Wallet bounds.")
     
     # 2. Acquire Investment Bucket
     bond_wallet = get_bond_portfolio_wallet(db, current_user.id)
@@ -57,7 +57,7 @@ def buy_bond(payload: BuyRequest, db: Session = Depends(get_db), current_user: U
             user_id=current_user.id,
             description=f"Automated Allocation to {target_bond.name}",
             ai_category="INVESTMENTS",
-            status=TransactionStatus.COMPLETED
+            status=TransactionStatus.PENDING
         )
         db.add(txn)
         db.flush()
@@ -88,11 +88,20 @@ def buy_bond(payload: BuyRequest, db: Session = Depends(get_db), current_user: U
             status=HoldingStatus.ACTIVE
         )
         db.add(holding)
+        txn.status = TransactionStatus.COMPLETED
         
         db.commit()
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        failed_txn = Transaction(
+            user_id=current_user.id,
+            description=f"Automated Allocation to {target_bond.name}",
+            ai_category="INVESTMENTS",
+            status=TransactionStatus.FAILED
+        )
+        db.add(failed_txn)
+        db.commit()
+        api_error(500, "BOND_PURCHASE_FAILED", "Bond purchase failed.", reason=str(e))
         
     return {"message": f"Successfully procured {payload.amount_paise/100} INR allocation inside {target_bond.name}"}
 

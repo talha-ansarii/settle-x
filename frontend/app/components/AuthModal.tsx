@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { signIn } from "next-auth/react";
 import { X, Loader2 } from "lucide-react";
+import { parseApiError } from "@/lib/api";
 
 export default function AuthModal({ isOpen, onClose }: { isOpen: boolean, onClose: () => void }) {
   const [step, setStep] = useState(1);
@@ -27,7 +28,7 @@ export default function AuthModal({ isOpen, onClose }: { isOpen: boolean, onClos
       if (res.ok) {
         setStep(2);
       } else {
-        setError(data.detail || "Failed to send OTP");
+        setError(parseApiError(data, "Failed to send OTP"));
       }
     } catch (err) {
       setError("Network Error");

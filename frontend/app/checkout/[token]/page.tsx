@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { Loader2, ShieldCheck, CheckCircle2 } from "lucide-react";
 import PinModal from "../../components/PinModal";
 import Link from "next/link";
+import { parseApiError } from "@/lib/api";
 
 export default function CheckoutPage() {
     const params = useParams();
@@ -27,7 +28,7 @@ export default function CheckoutPage() {
         })
         .then(res => res.json().then(data => ({ status: res.status, data })))
         .then(({ status, data }) => {
-            if (status !== 200) setError(data.detail || "Intent verification failed.");
+            if (status !== 200) setError(parseApiError(data, "Intent verification failed."));
             else setIntent(data);
         })
         .catch(() => setError("Network error resolving Intent token."));
@@ -50,7 +51,7 @@ export default function CheckoutPage() {
                 setSuccess(true);
                 setPinModalOpen(false);
             } else {
-                setError(data.detail);
+                setError(parseApiError(data, "Failed to execute intent payment."));
                 setPinModalOpen(false);
             }
         } catch (e) {

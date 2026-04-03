@@ -63,7 +63,7 @@ def run_seed():
             # Standardize the wallet hook
             wallet = LedgerAccount(
                 user_id=user.id,
-                name="SettleX Main Wallet",
+                name="Main Wallet",
                 account_type=AccountType.ASSET
             )
             db.add(wallet)

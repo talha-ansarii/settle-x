@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 from passlib.context import CryptContext
@@ -8,6 +8,7 @@ from models.user import User
 from models.ledger import LedgerAccount, AccountType, Transaction, LedgerEntry, EntryDirection, TransactionStatus
 from schemas.payments import PinSetup, TransferRequest
 from api.deps import get_current_user
+from core.http import api_error
 
 router = APIRouter()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -19,6 +20,18 @@ def get_wallet(db: Session, user_id: str) -> LedgerAccount:
         LedgerAccount.name == "Main Wallet",
         LedgerAccount.account_type == AccountType.ASSET
     ).first()
+
+    # Backward compatibility for older seeded wallets.
+    if not wallet:
+        wallet = db.query(LedgerAccount).filter(
+            LedgerAccount.user_id == user_id,
+            LedgerAccount.name == "SettleX Main Wallet",
+            LedgerAccount.account_type == AccountType.ASSET
+        ).first()
+        if wallet:
+            wallet.name = "Main Wallet"
+            db.commit()
+            db.refresh(wallet)
     
     if not wallet:
         wallet = LedgerAccount(user_id=user_id, name="Main Wallet", account_type=AccountType.ASSET)
@@ -77,34 +90,41 @@ def execute_transfer(payload: TransferRequest, db: Session = Depends(get_db), cu
     # 0. Formatting
     recipient_num = payload.recipient_mobile.replace("+91", "").replace(" ", "")
     if current_user.mobile_number == recipient_num:
-        raise HTTPException(status_code=400, detail="Cannot transfer to yourself.")
+        api_error(400, "SELF_TRANSFER_BLOCKED", "Cannot transfer to yourself.")
     
     if payload.amount_paise <= 0:
-         raise HTTPException(status_code=400, detail="Invalid transfer amount.")
+         api_error(400, "INVALID_AMOUNT", "Invalid transfer amount.")
     
     # 1. Idempotency Check
     existing_txn = db.query(Transaction).filter(Transaction.idempotency_key == payload.idempotency_key).first()
     if existing_txn:
-        # For idempotency, we return successful previous state to prevent blockages silently
-        return {"message": "Payment already processed", "transaction_id": existing_txn.id, "status": existing_txn.status}
+        if existing_txn.status == TransactionStatus.COMPLETED:
+            return {"message": "Payment already processed", "transaction_id": existing_txn.id, "status": existing_txn.status}
+        if existing_txn.status == TransactionStatus.FAILED:
+            # Allow safe retries after a failed internal attempt.
+            db.query(LedgerEntry).filter(LedgerEntry.transaction_id == existing_txn.id).delete()
+            db.delete(existing_txn)
+            db.commit()
+        else:
+            return {"message": "Payment already processed", "transaction_id": existing_txn.id, "status": existing_txn.status}
         
     # 2. PIN Validation
     if not current_user.transaction_pin_hash:
-        raise HTTPException(status_code=403, detail="PIN_NOT_SET")
+        api_error(403, "PIN_NOT_SET", "Transaction PIN is not set.")
     if not pwd_context.verify(payload.pin, current_user.transaction_pin_hash):
-        raise HTTPException(status_code=403, detail="Invalid PIN")
+        api_error(403, "INVALID_PIN", "Invalid PIN.")
         
     # 3. Recipient Check
     recipient = db.query(User).filter(User.mobile_number == recipient_num).first()
     if not recipient:
-        raise HTTPException(status_code=404, detail="Recipient is not registered on SettleX network.")
+        api_error(404, "RECIPIENT_NOT_FOUND", "Recipient is not registered on SettleX network.")
         
     # 4. Balance Verification
     sender_wallet = get_wallet(db, current_user.id)
     sender_balance = calculate_balance(db, sender_wallet.id)
     
     if sender_balance < payload.amount_paise:
-        raise HTTPException(status_code=400, detail="Insufficient Wallet Balance")
+        api_error(400, "INSUFFICIENT_BALANCE", "Insufficient Wallet Balance.")
         
     # 5. Execute Double Entry Ledger Logic
     recipient_wallet = get_wallet(db, recipient.id)
@@ -114,7 +134,7 @@ def execute_transfer(payload: TransferRequest, db: Session = Depends(get_db), cu
             user_id=current_user.id, 
             idempotency_key=payload.idempotency_key,
             description=f"P2P Transfer to {recipient_num}",
-            status=TransactionStatus.COMPLETED
+            status=TransactionStatus.PENDING
         )
         db.add(txn)
         db.flush() # flush to get txn ID before entries
@@ -135,11 +155,20 @@ def execute_transfer(payload: TransferRequest, db: Session = Depends(get_db), cu
         )
         db.add(credit_entry)
         db.add(debit_entry)
+        txn.status = TransactionStatus.COMPLETED
         
         db.commit()
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"Ledger Transaction Failed: {str(e)}")
+        failed_txn = Transaction(
+            user_id=current_user.id,
+            idempotency_key=payload.idempotency_key,
+            description=f"P2P Transfer to {recipient_num}",
+            status=TransactionStatus.FAILED
+        )
+        db.add(failed_txn)
+        db.commit()
+        api_error(500, "LEDGER_TXN_FAILED", "Ledger transaction failed.", reason=str(e))
         
     return {
         "message": "Transfer Successful",

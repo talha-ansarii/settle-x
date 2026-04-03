@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { Verified, TrendingUp, PiggyBank, RefreshCw, Loader2, ArrowRightLeft } from "lucide-react";
 import Link from "next/link";
+import { parseApiError } from "@/lib/api";
 
 export default function ProfilePage() {
     const { data: session, status } = useSession();
@@ -57,7 +58,7 @@ export default function ProfilePage() {
                 setAmount("");
                 fetchPortfolio(true);
             } else {
-                setTxMsg({ text: data.detail || "Transaction failed.", type: "error" });
+                setTxMsg({ text: parseApiError(data, "Transaction failed."), type: "error" });
             }
         } catch (e) {
             setTxMsg({ text: "Network synchronization failed.", type: "error" });

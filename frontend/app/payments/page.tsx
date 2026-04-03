@@ -4,6 +4,7 @@ import { useSession } from "next-auth/react";
 import { Wallet, SendHorizontal, History, Loader2, ArrowRightLeft, Landmark, CheckCircle2, ShieldCheck, RefreshCw } from "lucide-react";
 import PinModal from "../components/PinModal";
 import Link from "next/link";
+import { parseApiError } from "@/lib/api";
 
 export default function PaymentsPage() {
   const { data: session, status } = useSession();
@@ -80,7 +81,8 @@ export default function PaymentsPage() {
                 setIsPinModalOpen(false);
                 setPaymentMsg({ text: "PIN successfully setup! You can now make secure transfers.", type: "success" });
             } else {
-                setPaymentMsg({ text: "Failed to setup PIN.", type: "error" });
+                const data = await res.json().catch(() => ({}));
+                setPaymentMsg({ text: parseApiError(data, "Failed to setup PIN."), type: "error" });
             }
         } else {
             // Setup robust idempotency key to stop double tapping
@@ -109,7 +111,7 @@ export default function PaymentsPage() {
                 setIsPinModalOpen(false);
                 fetchBalance(true); // Refresh balance silently
             } else {
-                setPaymentMsg({ text: data.detail || "Transaction failed.", type: "error" });
+                setPaymentMsg({ text: parseApiError(data, "Transaction failed."), type: "error" });
                 setIsPinModalOpen(false);
             }
         }
