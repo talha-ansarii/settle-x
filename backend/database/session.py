@@ -4,9 +4,20 @@ from sqlalchemy.ext.declarative import declarative_base
 
 from core.config import settings
 
-connect_args = {"check_same_thread": False} if settings.DATABASE_URL.startswith("sqlite") else {}
+import os
+
+db_url = settings.DATABASE_URL
+# Fix Neon DB / SQLAlchemy 2.0+ compatibility issue
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+# Vercel functions have a read-only filesystem except for /tmp
+if os.environ.get("VERCEL") == "1" and db_url.startswith("sqlite"):
+    db_url = "sqlite:////tmp/msme_local.db"
+
+connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
 engine = create_engine(
-    settings.DATABASE_URL, connect_args=connect_args
+    db_url, connect_args=connect_args
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
