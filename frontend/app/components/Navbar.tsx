@@ -19,8 +19,8 @@ export default function Navbar() {
           {/* Logo */}
           <div className="flex-shrink-0 flex items-center">
             <Link href="/" className="flex items-center gap-1 text-2xl font-bold">
-              <span className="text-paytm-navy tracking-tight">paytm</span>
-              <span className="text-paytm-cyan text-sm align-top mt-1">UPI</span>
+              <span className="text-paytm-navy tracking-tight">Paytm</span>
+              <span className="text-paytm-cyan text-sm align-top mt-1">SettleX</span>
             </Link>
           </div>
 
