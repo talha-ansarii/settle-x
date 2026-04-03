@@ -12,6 +12,7 @@ from api.bonds import router as bonds_router
 from api.compliance import router as compliance_router
 from api.analytics import router as analytics_router
 from api.intelligence import router as intelligence_router
+from api.gateway import router as gateway_router
 
 # Import all models to ensure SQLAlchemy binds their schema definitions natively
 from models import *
@@ -40,6 +41,7 @@ app.include_router(bonds_router, prefix=f"{settings.API_V1_STR}/bonds", tags=["T
 app.include_router(compliance_router, prefix=f"{settings.API_V1_STR}/compliance", tags=["GST Compliance"])
 app.include_router(analytics_router, prefix=f"{settings.API_V1_STR}/analytics", tags=["Merchant Analytics"])
 app.include_router(intelligence_router, prefix=f"{settings.API_V1_STR}/intelligence", tags=["Consumer Intelligence"])
+app.include_router(gateway_router, prefix=f"{settings.API_V1_STR}/gateway", tags=["Payment Gateway & Reconciliation"])
 
 @app.get("/")
 def read_root():
