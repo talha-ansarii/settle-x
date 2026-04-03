@@ -47,6 +47,10 @@ app.include_router(gateway_router, prefix=f"{settings.API_V1_STR}/gateway", tags
 def read_root():
     return {"message": "MSME Intelligence Platform API is running."}
 
+@app.get("/health")
+def root_health_check():
+    return {"status": "ok"}
+
 @app.get("/api/v1/health")
 def health_check():
     return {
